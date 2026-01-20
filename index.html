@@ -455,12 +455,19 @@
 
     // Dashboard
     function renderDashboard(container) {
+      console.log('📊 RENDERING DASHBOARD');
+      console.log('📊 Total audits:', audits.length, audits);
+      console.log('📊 Total findings:', findings.length, findings);
+      console.log('📊 Total areas:', areas.length, areas);
+      
       const totalAudit = audits.length;
       const totalOpen = findings.filter(f => f.has_finding && f.status === 'open').length;
       const totalProgress = findings.filter(f => f.has_finding && f.status === 'progress').length;
       const totalClosed = findings.filter(f => !f.has_finding || f.status === 'closed').length;
       const totalFindings = findings.length;
       const percentClosed = totalFindings > 0 ? Math.round((totalClosed / totalFindings) * 100) : 0;
+      
+      console.log('📊 STATS:', { totalAudit, totalOpen, totalProgress, totalClosed, totalFindings, percentClosed });
       
       const auditors = [...new Set(audits.map(a => a.auditor))];
       const auditees = [...new Set(audits.map(a => a.auditee))];
@@ -662,12 +669,12 @@
 
     function renderAreaChart() {
       const areaFindings = {};
-      areas.forEach(a => areaFindings[a.id] = { name: a.name, count: 0 });
+      areas.forEach(a => areaFindings[String(a.id)] = { name: a.name, count: 0 });
       
       findings.filter(f => f.has_finding).forEach(f => {
         const audit = audits.find(a => a.id === f.audit_id);
-        if (audit && areaFindings[audit.area_id]) {
-          areaFindings[audit.area_id].count++;
+        if (audit && areaFindings[String(audit.area_id)]) {
+          areaFindings[String(audit.area_id)].count++;
         }
       });
       
@@ -731,10 +738,15 @@
     }
 
     function renderFindingsTable() {
+      console.log('🔍 FINDINGS:', findings.length, findings);
+      console.log('🔍 AUDITS:', audits.length, audits);
+      
       const findingsWithAudit = findings.map(f => {
-        const audit = audits.find(a => a.id === f.audit_id);
+        const audit = audits.find(a => String(a.id) === String(f.audit_id));
         return { ...f, audit };
       }).filter(f => f.audit && f.has_finding && f.status !== 'closed');
+      
+      console.log('🔍 FINDINGS WITH AUDIT (NOT CLOSED):', findingsWithAudit.length, findingsWithAudit);
       
       if (findingsWithAudit.length === 0) {
         return `<tr><td colspan="10" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">BELUM ADA TEMUAN YANG PERLU DITINDAKLANJUTI</td></tr>`;
@@ -768,9 +780,11 @@
 
     function renderClosedFindingsTable() {
       const closedFindings = findings.map(f => {
-        const audit = audits.find(a => a.id === f.audit_id);
+        const audit = audits.find(a => String(a.id) === String(f.audit_id));
         return { ...f, audit };
       }).filter(f => f.audit && f.has_finding && f.status === 'closed');
+      
+      console.log('🔍 CLOSED FINDINGS:', closedFindings.length, closedFindings);
       
       if (closedFindings.length === 0) {
         return `<tr><td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">BELUM ADA TEMUAN YANG SUDAH CLOSED</td></tr>`;
@@ -1104,12 +1118,22 @@
       const container = document.getElementById('audit-items-container');
       const itemsContainer = document.getElementById('audit-items');
       
+      console.log('🔍 LOAD AUDIT ITEMS - Area ID:', areaId);
+      console.log('🔍 ALL TEMPLATES:', auditTemplates);
+      
       if (!areaId) {
         container.classList.add('hidden');
         return;
       }
       
-      const items = auditTemplates.filter(t => t.area_id === areaId);
+      // CRITICAL FIX: Convert both to string for comparison
+      const items = auditTemplates.filter(t => {
+        const match = String(t.area_id) === String(areaId);
+        console.log(`Comparing template ${t.id}: ${t.area_id} (${typeof t.area_id}) === ${areaId} (${typeof areaId}) = ${match}`);
+        return match;
+      });
+      
+      console.log('🔍 FILTERED ITEMS:', items);
       
       if (items.length === 0) {
         itemsContainer.innerHTML = `
@@ -1250,6 +1274,9 @@
       const auditee = document.getElementById('audit-auditee').value;
       const areaId = document.getElementById('audit-area').value;
       
+      console.log('💾 SAVE AUDIT - Area ID:', areaId, 'Type:', typeof areaId);
+      console.log('💾 AUDIT TEMPLATES:', auditTemplates);
+      
       if (!auditDate || !auditor || !auditee || !areaId) {
         showToast('LENGKAPI SEMUA FIELD YANG DIPERLUKAN', 'error');
         return;
@@ -1265,6 +1292,8 @@
           created_at: new Date().toISOString()
         };
         
+        console.log('💾 INSERTING AUDIT:', audit);
+        
         const { data: auditData, error: auditError } = await supabaseClient
           .from('audits')
           .insert([audit])
@@ -1273,15 +1302,21 @@
         
         if (auditError) throw auditError;
         
+        console.log('✅ AUDIT SAVED:', auditData);
+        
         audits.unshift(auditData);
         const auditId = auditData.id;
         
-        // Insert findings
-        const items = auditTemplates.filter(t => t.area_id === areaId);
+        // Insert findings - CRITICAL FIX: String comparison
+        const items = auditTemplates.filter(t => String(t.area_id) === String(areaId));
+        console.log('💾 FILTERED ITEMS FOR FINDINGS:', items.length, items);
+        
         const findingsToInsert = [];
         
         items.forEach(item => {
           const hasFinding = document.querySelector(`input[name="finding-${item.id}"]:checked`)?.value === 'yes';
+          
+          console.log(`💾 ITEM ${item.id}: Has finding = ${hasFinding}`);
           
           const finding = {
             audit_id: auditId,
@@ -1297,23 +1332,40 @@
             finding.location_detail = document.getElementById(`loc-${item.id}`)?.value || '';
             finding.due_date = document.getElementById(`due-${item.id}`)?.value || null;
             finding.photo_before = document.getElementById(`photo-data-${item.id}`)?.value || null;
+            console.log(`💾 FINDING DETAILS:`, finding);
           }
           
           findingsToInsert.push(finding);
         });
         
+        console.log('💾 TOTAL FINDINGS TO INSERT:', findingsToInsert.length, findingsToInsert);
+        
         if (findingsToInsert.length > 0) {
+          console.log('💾 INSERTING FINDINGS INTO DATABASE...');
+          
           const { data: findingsData, error: findingsError } = await supabaseClient
             .from('findings')
             .insert(findingsToInsert)
             .select();
           
-          if (!findingsError && findingsData) {
+          if (findingsError) {
+            console.error('❌ ERROR INSERTING FINDINGS:', findingsError);
+            throw findingsError;
+          }
+          
+          console.log('✅ FINDINGS SAVED:', findingsData);
+          
+          if (findingsData) {
             findings.unshift(...findingsData);
+            console.log('✅ FINDINGS ARRAY UPDATED. Total findings now:', findings.length);
           }
         }
         
-        await logActivity('CREATE_AUDIT', `MEMBUAT AUDIT BARU UNTUK AREA ${areas.find(a => a.id === areaId)?.name || areaId}`);
+        console.log('✅✅✅ AUDIT & FINDINGS COMPLETE!');
+        console.log('📊 AUDITS:', audits.length);
+        console.log('📊 FINDINGS:', findings.length);
+        
+        await logActivity('CREATE_AUDIT', `MEMBUAT AUDIT BARU UNTUK AREA ${areas.find(a => String(a.id) === String(areaId))?.name || areaId}`);
         showToast('AUDIT BERHASIL DISIMPAN', 'success');
         navigateTo('dashboard');
       } catch (error) {
@@ -1373,7 +1425,8 @@
         return;
       }
       
-      tempTemplateItems = auditTemplates.filter(t => t.area_id === areaId).map(t => ({ ...t }));
+      // CRITICAL FIX: Convert both to string for comparison
+      tempTemplateItems = auditTemplates.filter(t => String(t.area_id) === String(areaId)).map(t => ({ ...t }));
       renderTemplateItems();
       container.classList.remove('hidden');
     }
@@ -1455,17 +1508,29 @@
         
         if (insertError) throw insertError;
         
-        // Update local state
-        auditTemplates = auditTemplates.filter(t => t.area_id !== areaId);
-        if (data) {
-          auditTemplates.push(...data);
-        }
+        // CRITICAL FIX: FORCE RELOAD semua template dari database
+        const { data: allTemplates, error: reloadError } = await supabaseClient
+          .from('audit_templates')
+          .select('*')
+          .order('created_at');
+        
+        if (reloadError) throw reloadError;
+        
+        // Update global state dengan data fresh dari database
+        auditTemplates = allTemplates || [];
+        
+        console.log('✅ TEMPLATE SAVED & RELOADED:', auditTemplates);
         
         await logActivity('SAVE_TEMPLATE', `MENYIMPAN TEMPLATE AUDIT UNTUK AREA ${areas.find(a => a.id === areaId)?.name || areaId}`);
-        showToast('TEMPLATE BERHASIL DISIMPAN', 'success');
+        showToast('TEMPLATE BERHASIL DISIMPAN ✓', 'success');
+        
+        // CRITICAL: Update tempTemplateItems dengan data BARU dari database (bukan filter lama)
+        // Filter HARUS pakai String() karena type mismatch
+        tempTemplateItems = allTemplates.filter(t => String(t.area_id) === String(areaId)).map(t => ({ ...t }));
+        renderTemplateItems();
       } catch (error) {
-        console.error('Error saving template:', error);
-        showToast('GAGAL MENYIMPAN TEMPLATE', 'error');
+        console.error('❌ Error saving template:', error);
+        showToast('GAGAL MENYIMPAN TEMPLATE: ' + error.message, 'error');
       }
     }
 
@@ -1683,5 +1748,5 @@
     // Initialize app
     init();
   </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c0cf927d308ce23',t:'MTc2ODg5NTM0Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c0d1648d4e1f88a',t:'MTc2ODg5NjUzOS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

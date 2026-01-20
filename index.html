@@ -1,0 +1,1686 @@
+<!doctype html>
+<html lang="id" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistem Monitoring Audit 5R</title>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { 
+      box-sizing: border-box;
+      text-transform: uppercase;
+    }
+    .sidebar-item { transition: all 0.2s ease; }
+    .sidebar-item:hover { transform: translateX(4px); }
+    .card-hover { transition: all 0.3s ease; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 40px -10px rgba(0,0,0,0.2); }
+    .fade-in { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .btn-primary { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }
+    .btn-primary:hover { background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-thumb { background: #475569; }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full bg-gray-50 dark:bg-slate-900 font-sans">
+  <div id="app" class="h-full overflow-auto"></div>
+  <script>
+    // Supabase Configuration
+    const SUPABASE_URL = 'https://rmycdaviqpasbsjfytyc.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJteWNkYXZpcXBhc2JzamZ5dHljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg4ODk5NzMsImV4cCI6MjA4NDQ2NTk3M30.0kb-HJGm2PueyTzYsdD6tN3Mtpolcsygo7BUXPO-yx0';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    let currentUser = null;
+    let currentPage = 'dashboard';
+    let isDarkMode = localStorage.getItem('darkMode') === 'true';
+    
+    // State - akan diisi dari Supabase
+    let areas = [];
+    let auditTemplates = [];
+    let audits = [];
+    let findings = [];
+    let activityLogs = [];
+
+    // Default Config
+    const defaultConfig = {
+      app_title: 'SISTEM MONITORING AUDIT 5R',
+      primary_color: '#4f46e5',
+      background_color: '#f8fafc',
+      text_color: '#1e293b',
+      surface_color: '#ffffff',
+      accent_color: '#10b981'
+    };
+
+    let config = { ...defaultConfig };
+
+    // Initialize
+    async function init() {
+      if (isDarkMode) {
+        document.documentElement.classList.add('dark');
+      }
+      
+      // Load user from localStorage
+      const savedUser = localStorage.getItem('currentUser');
+      if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+      }
+      
+      // Load data from Supabase
+      await initDatabase();
+      
+      if (currentUser) {
+        renderApp();
+      } else {
+        renderLogin();
+      }
+
+      // Initialize Element SDK
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange: async (newConfig) => {
+            config = { ...config, ...newConfig };
+            applyConfig();
+          },
+          mapToCapabilities: (cfg) => ({
+            recolorables: [
+              { get: () => cfg.primary_color || defaultConfig.primary_color, set: (v) => { cfg.primary_color = v; window.elementSdk.setConfig({ primary_color: v }); } },
+              { get: () => cfg.background_color || defaultConfig.background_color, set: (v) => { cfg.background_color = v; window.elementSdk.setConfig({ background_color: v }); } },
+              { get: () => cfg.text_color || defaultConfig.text_color, set: (v) => { cfg.text_color = v; window.elementSdk.setConfig({ text_color: v }); } },
+              { get: () => cfg.surface_color || defaultConfig.surface_color, set: (v) => { cfg.surface_color = v; window.elementSdk.setConfig({ surface_color: v }); } },
+              { get: () => cfg.accent_color || defaultConfig.accent_color, set: (v) => { cfg.accent_color = v; window.elementSdk.setConfig({ accent_color: v }); } }
+            ],
+            borderables: [],
+            fontEditable: undefined,
+            fontSizeable: undefined
+          }),
+          mapToEditPanelValues: (cfg) => new Map([
+            ['app_title', cfg.app_title || defaultConfig.app_title]
+          ])
+        });
+      }
+    }
+
+    function applyConfig() {
+      const titleEl = document.getElementById('app-title');
+      if (titleEl) titleEl.textContent = config.app_title;
+    }
+
+    // Supabase Database Functions
+    async function initDatabase() {
+      try {
+        // Load areas
+        const { data: areasData, error: areasError } = await supabase
+          .from('areas')
+          .select('*')
+          .order('name');
+        
+        if (!areasError && areasData) {
+          areas = areasData;
+        }
+        
+        // Load audit templates
+        const { data: templatesData, error: templatesError } = await supabase
+          .from('audit_templates')
+          .select('*')
+          .order('created_at');
+        
+        if (!templatesError && templatesData) {
+          auditTemplates = templatesData;
+        }
+        
+        // Load audits
+        const { data: auditsData, error: auditsError } = await supabase
+          .from('audits')
+          .select('*')
+          .order('audit_date', { ascending: false });
+        
+        if (!auditsError && auditsData) {
+          audits = auditsData;
+        }
+        
+        // Load findings
+        const { data: findingsData, error: findingsError } = await supabase
+          .from('findings')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (!findingsError && findingsData) {
+          findings = findingsData;
+        }
+        
+        // Load activity logs
+        const { data: logsData, error: logsError } = await supabase
+          .from('activity_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        
+        if (!logsError && logsData) {
+          activityLogs = logsData;
+        }
+        
+      } catch (error) {
+        console.error('Error loading data:', error);
+        showToast('GAGAL MEMUAT DATA DARI DATABASE', 'error');
+      }
+    }
+
+    // Toggle Dark Mode
+    function toggleDarkMode() {
+      isDarkMode = !isDarkMode;
+      localStorage.setItem('darkMode', isDarkMode);
+      document.documentElement.classList.toggle('dark', isDarkMode);
+      renderApp();
+    }
+
+    // Authentication
+    function login(username, password) {
+      if (password === 'admin123') {
+        currentUser = { username, full_name: username.toUpperCase(), role: 'ADMIN' };
+      } else if (password === 'user123') {
+        currentUser = { username, full_name: username.toUpperCase(), role: 'USER' };
+      } else {
+        return false;
+      }
+      
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
+      logActivity('LOGIN', `LOGIN KE SISTEM SEBAGAI ${currentUser.role}`);
+      renderApp();
+      return true;
+    }
+
+    function logout() {
+      logActivity('LOGOUT', 'LOGOUT DARI SISTEM');
+      currentUser = null;
+      localStorage.removeItem('currentUser');
+      renderLogin();
+    }
+
+    // Activity Logging
+    async function logActivity(action, details) {
+      const log = {
+        user_name: currentUser?.full_name || 'SYSTEM',
+        action,
+        details,
+        created_at: new Date().toISOString()
+      };
+      
+      try {
+        const { data, error } = await supabase
+          .from('activity_logs')
+          .insert([log])
+          .select()
+          .single();
+        
+        if (!error && data) {
+          activityLogs.unshift(data);
+        }
+      } catch (error) {
+        console.error('Error logging activity:', error);
+      }
+    }
+
+    // Render Login
+    function renderLogin() {
+      const app = document.getElementById('app');
+      app.innerHTML = `
+        <div class="min-h-full flex items-center justify-center p-4 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500">
+          <div class="w-full max-w-md">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 fade-in">
+              <div class="text-center mb-8">
+                <div class="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                  <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                  </svg>
+                </div>
+                <h1 id="app-title" class="text-2xl font-bold text-gray-800 dark:text-white">${config.app_title}</h1>
+                <p class="text-gray-500 dark:text-gray-400 mt-2">SILAKAN LOGIN UNTUK MELANJUTKAN</p>
+              </div>
+              
+              <div id="login-error" class="hidden mb-4 p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm"></div>
+              
+              <form id="login-form" class="space-y-5">
+                <div>
+                  <label for="login-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">USERNAME (NAMA LENGKAP)</label>
+                  <input type="text" id="login-username" required style="text-transform: uppercase;"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                    placeholder="MASUKKAN NAMA LENGKAP">
+                </div>
+                <div>
+                  <label for="login-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">PASSWORD</label>
+                  <input type="password" id="login-password" required
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
+                    placeholder="MASUKKAN PASSWORD">
+                </div>
+                <button type="submit" class="w-full py-3 btn-primary text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition transform hover:-translate-y-0.5">
+                  LOGIN
+                </button>
+              </form>
+              
+              <div class="mt-6 p-4 bg-gray-50 dark:bg-slate-700/50 rounded-xl">
+                <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
+                  <strong>ADMIN:</strong> PASSWORD = ADMIN123<br>
+                  <strong>USER:</strong> PASSWORD = USER123
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('login-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
+        
+        if (!username) {
+          showLoginError('USERNAME TIDAK BOLEH KOSONG');
+          return;
+        }
+        
+        const success = login(username, password);
+        if (!success) {
+          showLoginError('PASSWORD SALAH. GUNAKAN ADMIN123 (ADMIN) ATAU USER123 (USER)');
+        }
+      });
+    }
+
+    function showLoginError(message) {
+      const errorEl = document.getElementById('login-error');
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+    }
+
+    // Main App Render
+    function renderApp() {
+      const app = document.getElementById('app');
+      const isAdmin = currentUser?.role === 'ADMIN';
+      
+      app.innerHTML = `
+        <div class="flex h-full">
+          <!-- Sidebar -->
+          <aside id="sidebar" class="w-64 bg-white dark:bg-slate-800 shadow-xl flex-shrink-0 flex flex-col transition-all duration-300 lg:relative fixed inset-y-0 left-0 z-50 transform lg:translate-x-0 -translate-x-full">
+            <div class="p-6 border-b border-gray-100 dark:border-slate-700">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow">
+                  <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                  </svg>
+                </div>
+                <div>
+                  <h1 class="font-bold text-gray-800 dark:text-white text-sm">AUDIT 5R</h1>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">MONITORING SYSTEM</p>
+                </div>
+              </div>
+            </div>
+            
+            <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+              <button onclick="navigateTo('dashboard')" class="sidebar-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${currentPage === 'dashboard' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+                <span class="font-medium">DASHBOARD</span>
+              </button>
+              
+              <button onclick="navigateTo('form-audit')" class="sidebar-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${currentPage === 'form-audit' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                <span class="font-medium">FORM AUDIT</span>
+              </button>
+              
+              ${isAdmin ? `
+              <button onclick="navigateTo('audit-management')" class="sidebar-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${currentPage === 'audit-management' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span class="font-medium">AUDIT MANAGEMENT</span>
+                <span class="ml-auto px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full">ADMIN</span>
+              </button>
+              ` : ''}
+              
+              <button onclick="navigateTo('history')" class="sidebar-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left ${currentPage === 'history' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-slate-700'}">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="font-medium">HISTORY</span>
+              </button>
+            </nav>
+            
+            <!-- User Info -->
+            <div class="p-4 border-t border-gray-100 dark:border-slate-700">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full flex items-center justify-center text-white font-bold">
+                  ${currentUser?.full_name?.charAt(0)?.toUpperCase() || 'U'}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="font-medium text-gray-800 dark:text-white text-sm truncate">${currentUser?.full_name || 'USER'}</p>
+                  <p class="text-xs text-gray-500 dark:text-gray-400">${currentUser?.role || 'USER'}</p>
+                </div>
+              </div>
+              <button onclick="logout()" class="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                <span class="text-sm font-medium">LOGOUT</span>
+              </button>
+            </div>
+          </aside>
+          
+          <!-- Overlay for mobile -->
+          <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-40 lg:hidden hidden" onclick="toggleSidebar()"></div>
+          
+          <!-- Main Content -->
+          <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <!-- Top Bar -->
+            <header class="h-16 bg-white dark:bg-slate-800 shadow-sm flex items-center justify-between px-4 lg:px-6 flex-shrink-0">
+              <div class="flex items-center gap-4">
+                <button onclick="toggleSidebar()" class="lg:hidden p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg">
+                  <svg class="w-6 h-6 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <h2 class="text-lg lg:text-xl font-bold text-gray-800 dark:text-white capitalize">${currentPage.replace('-', ' ')}</h2>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="toggleDarkMode()" class="p-2 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition">
+                  ${isDarkMode ? 
+                    '<svg class="w-5 h-5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>' :
+                    '<svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>'
+                  }
+                </button>
+              </div>
+            </header>
+            
+            <!-- Page Content -->
+            <div id="page-content" class="flex-1 overflow-auto p-4 lg:p-6">
+              <!-- Dynamic content -->
+            </div>
+          </main>
+        </div>
+        
+        <!-- Modal Container -->
+        <div id="modal-container"></div>
+        
+        <!-- Toast Container -->
+        <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+      `;
+      
+      renderPageContent();
+    }
+
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+      sidebar.classList.toggle('-translate-x-full');
+      overlay.classList.toggle('hidden');
+    }
+
+    function navigateTo(page) {
+      currentPage = page;
+      renderApp();
+      const sidebar = document.getElementById('sidebar');
+      if (sidebar && !sidebar.classList.contains('-translate-x-full')) {
+        toggleSidebar();
+      }
+    }
+
+    function renderPageContent() {
+      const content = document.getElementById('page-content');
+      switch(currentPage) {
+        case 'dashboard':
+          renderDashboard(content);
+          break;
+        case 'form-audit':
+          renderFormAudit(content);
+          break;
+        case 'audit-management':
+          renderAuditManagement(content);
+          break;
+        case 'history':
+          renderHistory(content);
+          break;
+      }
+    }
+
+    // Dashboard
+    function renderDashboard(container) {
+      const totalAudit = audits.length;
+      const totalOpen = findings.filter(f => f.has_finding && f.status === 'open').length;
+      const totalProgress = findings.filter(f => f.has_finding && f.status === 'progress').length;
+      const totalClosed = findings.filter(f => !f.has_finding || f.status === 'closed').length;
+      const totalFindings = findings.length;
+      const percentClosed = totalFindings > 0 ? Math.round((totalClosed / totalFindings) * 100) : 0;
+      
+      const auditors = [...new Set(audits.map(a => a.auditor))];
+      const auditees = [...new Set(audits.map(a => a.auditee))];
+      
+      container.innerHTML = `
+        <div class="fade-in space-y-6">
+          <!-- Filters -->
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+            <h3 class="font-semibold text-gray-800 dark:text-white mb-4">FILTER DATA</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+              <div>
+                <label for="filter-start-date" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">TANGGAL MULAI</label>
+                <input type="date" id="filter-start-date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+              </div>
+              <div>
+                <label for="filter-end-date" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">TANGGAL AKHIR</label>
+                <input type="date" id="filter-end-date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+              </div>
+              <div>
+                <label for="filter-area" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">AREA</label>
+                <select id="filter-area" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                  <option value="">SEMUA AREA</option>
+                  ${areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label for="filter-auditor" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">AUDITOR</label>
+                <select id="filter-auditor" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                  <option value="">SEMUA AUDITOR</option>
+                  ${auditors.map(a => `<option value="${a}">${a}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label for="filter-auditee" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">AUDITEE</label>
+                <select id="filter-auditee" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                  <option value="">SEMUA AUDITEE</option>
+                  ${auditees.map(a => `<option value="${a}">${a}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Score Cards -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6 card-hover">
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center">
+                  <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                </div>
+              </div>
+              <p class="text-2xl lg:text-3xl font-bold text-gray-800 dark:text-white">${totalAudit}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">TOTAL AUDIT</p>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6 card-hover">
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-xl flex items-center justify-center">
+                  <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+              </div>
+              <p class="text-2xl lg:text-3xl font-bold text-red-600 dark:text-red-400">${totalOpen}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">OPEN</p>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6 card-hover">
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 bg-amber-100 dark:bg-amber-900/30 rounded-xl flex items-center justify-center">
+                  <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+              </div>
+              <p class="text-2xl lg:text-3xl font-bold text-amber-600 dark:text-amber-400">${totalProgress}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">PROGRESS</p>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6 card-hover">
+              <div class="flex items-center justify-between mb-3">
+                <div class="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center">
+                  <svg class="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+              </div>
+              <p class="text-2xl lg:text-3xl font-bold text-emerald-600 dark:text-emerald-400">${totalClosed}</p>
+              <p class="text-sm text-gray-500 dark:text-gray-400">CLOSED</p>
+            </div>
+          </div>
+          
+          <!-- Percentage Bar -->
+          <div class="grid grid-cols-3 gap-4">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+              <div class="text-center mb-3">
+                <p class="text-2xl lg:text-3xl font-bold text-red-600 dark:text-red-400">${totalFindings > 0 ? Math.round((totalOpen / totalFindings) * 100) : 0}%</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">% OPEN</p>
+              </div>
+              <div class="h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div class="h-full bg-red-500 flex items-center justify-center transition-all duration-500" style="width: ${totalFindings > 0 ? Math.round((totalOpen / totalFindings) * 100) : 0}%">
+                  <span class="text-xs font-bold text-white">${totalFindings > 0 && totalOpen > 0 ? Math.round((totalOpen / totalFindings) * 100) + '%' : ''}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+              <div class="text-center mb-3">
+                <p class="text-2xl lg:text-3xl font-bold text-amber-600 dark:text-amber-400">${totalFindings > 0 ? Math.round((totalProgress / totalFindings) * 100) : 0}%</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">% PROGRESS</p>
+              </div>
+              <div class="h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div class="h-full bg-amber-500 flex items-center justify-center transition-all duration-500" style="width: ${totalFindings > 0 ? Math.round((totalProgress / totalFindings) * 100) : 0}%">
+                  <span class="text-xs font-bold text-white">${totalFindings > 0 && totalProgress > 0 ? Math.round((totalProgress / totalFindings) * 100) + '%' : ''}</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+              <div class="text-center mb-3">
+                <p class="text-2xl lg:text-3xl font-bold text-emerald-600 dark:text-emerald-400">${percentClosed}%</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">% CLOSED</p>
+              </div>
+              <div class="h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 flex items-center justify-center transition-all duration-500" style="width: ${percentClosed}%">
+                  <span class="text-xs font-bold text-white">${percentClosed > 0 ? percentClosed + '%' : ''}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Charts -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+              <h3 class="font-semibold text-gray-800 dark:text-white mb-4">TEMUAN PER AREA</h3>
+              <div class="space-y-3">
+                ${renderAreaChart()}
+              </div>
+            </div>
+            
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-4 lg:p-6">
+              <h3 class="font-semibold text-gray-800 dark:text-white mb-4">KONTRIBUSI AUDITOR VS AUDITEE</h3>
+              <div class="space-y-3">
+                ${renderContributionChart()}
+              </div>
+            </div>
+          </div>
+          
+          <!-- Detail List -->
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden">
+            <div class="p-4 lg:p-6 border-b border-gray-100 dark:border-slate-700">
+              <h3 class="font-semibold text-gray-800 dark:text-white">DETAIL TEMUAN (PERLU TINDAK LANJUT)</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-slate-700/50">
+                  <tr>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">NO</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">TGL AUDIT</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">DUE DATE</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">AUDITOR</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">AUDITEE</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">TEMUAN</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">FOTO BEFORE</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">STATUS</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">PERBAIKAN</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">AKSI</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+                  ${renderFindingsTable()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <!-- Riwayat Closed -->
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden">
+            <div class="p-4 lg:p-6 border-b border-gray-100 dark:border-slate-700">
+              <h3 class="font-semibold text-gray-800 dark:text-white">RIWAYAT TEMUAN YANG SUDAH CLOSED</h3>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full">
+                <thead class="bg-gray-50 dark:bg-slate-700/50">
+                  <tr>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">NO</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">TGL AUDIT</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">AUDITOR</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">AUDITEE</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">TEMUAN</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">FOTO BEFORE</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">FOTO AFTER</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">PERBAIKAN</th>
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">PIC</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-slate-700">
+                  ${renderClosedFindingsTable()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderAreaChart() {
+      const areaFindings = {};
+      areas.forEach(a => areaFindings[a.id] = { name: a.name, count: 0 });
+      
+      findings.filter(f => f.has_finding).forEach(f => {
+        const audit = audits.find(a => a.id === f.audit_id);
+        if (audit && areaFindings[audit.area_id]) {
+          areaFindings[audit.area_id].count++;
+        }
+      });
+      
+      const maxCount = Math.max(...Object.values(areaFindings).map(a => a.count), 1);
+      
+      return Object.values(areaFindings).map(area => `
+        <div class="flex items-center gap-3">
+          <div class="w-32 lg:w-40 text-xs lg:text-sm text-gray-600 dark:text-gray-400 break-words leading-tight">${area.name}</div>
+          <div class="flex-1 h-6 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+            <div class="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500" style="width: ${(area.count / maxCount) * 100}%"></div>
+          </div>
+          <div class="w-8 text-sm font-semibold text-gray-800 dark:text-white text-right">${area.count}</div>
+        </div>
+      `).join('');
+    }
+
+    function renderContributionChart() {
+      const auditorCounts = {};
+      const auditeeCounts = {};
+      
+      audits.forEach(a => {
+        auditorCounts[a.auditor] = (auditorCounts[a.auditor] || 0) + 1;
+        auditeeCounts[a.auditee] = (auditeeCounts[a.auditee] || 0) + 1;
+      });
+      
+      const topAuditors = Object.entries(auditorCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
+      const topAuditees = Object.entries(auditeeCounts).sort((a,b) => b[1] - a[1]).slice(0, 5);
+      
+      const maxCount = Math.max(...topAuditors.map(a => a[1]), ...topAuditees.map(a => a[1]), 1);
+      
+      let html = '<div class="grid grid-cols-2 gap-4">';
+      html += '<div><p class="text-xs text-gray-500 dark:text-gray-400 mb-2 font-semibold">TOP AUDITOR</p>';
+      topAuditors.forEach(([name, count]) => {
+        html += `
+          <div class="flex items-center gap-2 mb-2">
+            <div class="w-20 lg:w-24 text-xs text-gray-600 dark:text-gray-400 break-words leading-tight">${name}</div>
+            <div class="flex-1 h-4 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-emerald-400 to-cyan-500 rounded-full" style="width: ${(count / maxCount) * 100}%"></div>
+            </div>
+            <div class="w-6 text-xs font-semibold text-gray-800 dark:text-white">${count}</div>
+          </div>
+        `;
+      });
+      html += '</div>';
+      
+      html += '<div><p class="text-xs text-gray-500 dark:text-gray-400 mb-2 font-semibold">TOP AUDITEE</p>';
+      topAuditees.forEach(([name, count]) => {
+        html += `
+          <div class="flex items-center gap-2 mb-2">
+            <div class="w-20 lg:w-24 text-xs text-gray-600 dark:text-gray-400 break-words leading-tight">${name}</div>
+            <div class="flex-1 h-4 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full" style="width: ${(count / maxCount) * 100}%"></div>
+            </div>
+            <div class="w-6 text-xs font-semibold text-gray-800 dark:text-white">${count}</div>
+          </div>
+        `;
+      });
+      html += '</div></div>';
+      
+      return html;
+    }
+
+    function renderFindingsTable() {
+      const findingsWithAudit = findings.map(f => {
+        const audit = audits.find(a => a.id === f.audit_id);
+        return { ...f, audit };
+      }).filter(f => f.audit && f.has_finding && f.status !== 'closed');
+      
+      if (findingsWithAudit.length === 0) {
+        return `<tr><td colspan="10" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">BELUM ADA TEMUAN YANG PERLU DITINDAKLANJUTI</td></tr>`;
+      }
+      
+      return findingsWithAudit.map((f, i) => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${i + 1}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${formatDate(f.audit?.audit_date)}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${formatDate(f.due_date)}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${f.audit?.auditor || '-'}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${f.audit?.auditee || '-'}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200 max-w-xs truncate">${f.description || '-'}</td>
+          <td class="px-4 py-3">
+            ${f.photo_before ? `<img src="${f.photo_before}" loading="lazy" class="w-16 h-16 object-cover rounded-lg cursor-pointer" onclick="showImageModal('${f.photo_before}')" alt="Foto Before">` : '<span class="text-gray-400 text-xs">-</span>'}
+          </td>
+          <td class="px-4 py-3">
+            <span class="px-2 py-1 text-xs font-semibold rounded-full ${getStatusClass(f.status)}">${getStatusText(f.status)}</span>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200 max-w-xs truncate">${f.repair_activity || '-'}</td>
+          <td class="px-4 py-3">
+            ${f.status !== 'closed' ? `
+              <button onclick="showUpdateModal('${f.id}')" class="px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition">
+                UPDATE
+              </button>
+            ` : '<span class="text-emerald-600 dark:text-emerald-400 text-sm">✓ SELESAI</span>'}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderClosedFindingsTable() {
+      const closedFindings = findings.map(f => {
+        const audit = audits.find(a => a.id === f.audit_id);
+        return { ...f, audit };
+      }).filter(f => f.audit && f.has_finding && f.status === 'closed');
+      
+      if (closedFindings.length === 0) {
+        return `<tr><td colspan="9" class="px-4 py-8 text-center text-gray-500 dark:text-gray-400">BELUM ADA TEMUAN YANG SUDAH CLOSED</td></tr>`;
+      }
+      
+      return closedFindings.map((f, i) => `
+        <tr class="hover:bg-gray-50 dark:hover:bg-slate-700/50">
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${i + 1}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${formatDate(f.audit?.audit_date)}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${f.audit?.auditor || '-'}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${f.audit?.auditee || '-'}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200 max-w-xs truncate">${f.description || '-'}</td>
+          <td class="px-4 py-3">
+            ${f.photo_before ? `<img src="${f.photo_before}" loading="lazy" class="w-16 h-16 object-cover rounded-lg cursor-pointer" onclick="showImageModal('${f.photo_before}')" alt="Foto Before">` : '<span class="text-gray-400 text-xs">-</span>'}
+          </td>
+          <td class="px-4 py-3">
+            ${f.photo_after ? `<img src="${f.photo_after}" loading="lazy" class="w-16 h-16 object-cover rounded-lg cursor-pointer" onclick="showImageModal('${f.photo_after}')" alt="Foto After">` : '<span class="text-gray-400 text-xs">-</span>'}
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200 max-w-xs truncate">${f.repair_activity || '-'}</td>
+          <td class="px-4 py-3 text-sm text-gray-800 dark:text-gray-200">${f.pic_repair || '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function getStatusClass(status) {
+      switch(status) {
+        case 'open': return 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400';
+        case 'progress': return 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400';
+        case 'closed': return 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400';
+        default: return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
+      }
+    }
+    
+    function getStatusText(status) {
+      const statusMap = {
+        'open': 'OPEN',
+        'progress': 'PROGRESS',
+        'closed': 'CLOSED'
+      };
+      return statusMap[status] || status.toUpperCase();
+    }
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MEI', 'JUN', 'JUL', 'AGU', 'SEP', 'OKT', 'NOV', 'DES'];
+      return `${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]} ${date.getFullYear()}`;
+    }
+
+    function showUpdateModal(findingId) {
+      const finding = findings.find(f => f.id === findingId);
+      if (!finding) return;
+      
+      const modal = document.getElementById('modal-container');
+      modal.innerHTML = `
+        <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onclick="closeModal(event)">
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90%] overflow-auto" onclick="event.stopPropagation()">
+            <div class="p-6 border-b border-gray-100 dark:border-slate-700">
+              <h3 class="text-lg font-bold text-gray-800 dark:text-white">UPDATE STATUS TEMUAN</h3>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${finding.description || finding.item_name}</p>
+            </div>
+            <form id="update-form" class="p-6 space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">PILIH STATUS</label>
+                <div class="flex gap-3">
+                  <label class="flex-1">
+                    <input type="radio" name="status" value="progress" class="sr-only peer" ${finding.status === 'progress' ? 'checked' : ''}>
+                    <div class="p-3 text-center rounded-xl border-2 border-gray-200 dark:border-slate-600 peer-checked:border-amber-500 peer-checked:bg-amber-50 dark:peer-checked:bg-amber-900/20 cursor-pointer transition">
+                      <span class="text-sm font-medium text-gray-700 dark:text-gray-300">PROGRESS</span>
+                    </div>
+                  </label>
+                  <label class="flex-1">
+                    <input type="radio" name="status" value="closed" class="sr-only peer">
+                    <div class="p-3 text-center rounded-xl border-2 border-gray-200 dark:border-slate-600 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 dark:peer-checked:bg-emerald-900/20 cursor-pointer transition">
+                      <span class="text-sm font-medium text-gray-700 dark:text-gray-300">CLOSED</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              
+              <div id="progress-fields" class="${finding.status === 'progress' ? '' : 'hidden'}">
+                <div class="space-y-4">
+                  <div>
+                    <label for="repair-activity" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">KEGIATAN PERBAIKAN</label>
+                    <textarea id="repair-activity" rows="2" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="JELASKAN KEGIATAN PERBAIKAN...">${finding.repair_activity || ''}</textarea>
+                  </div>
+                  <div>
+                    <label for="pic-repair" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">PIC PERBAIKAN</label>
+                    <input type="text" id="pic-repair" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="NAMA PIC" value="${finding.pic_repair || ''}">
+                  </div>
+                  <div>
+                    <label for="current-condition" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">KONDISI/PROBLEM SAAT INI</label>
+                    <textarea id="current-condition" rows="2" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="JELASKAN KONDISI SAAT INI...">${finding.current_condition || ''}</textarea>
+                  </div>
+                </div>
+              </div>
+              
+              <div id="closed-fields" class="hidden">
+                <div class="space-y-4">
+                  <div>
+                    <label for="closed-repair-activity" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">KEGIATAN PERBAIKAN</label>
+                    <textarea id="closed-repair-activity" rows="2" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="JELASKAN KEGIATAN PERBAIKAN..."></textarea>
+                  </div>
+                  <div>
+                    <label for="closed-pic-repair" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">PIC PERBAIKAN</label>
+                    <input type="text" id="closed-pic-repair" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="NAMA PIC">
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">UPLOAD FOTO AFTER</label>
+                    <div class="flex gap-2">
+                      <label for="photo-after-file" class="flex-1 flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-xl cursor-pointer hover:border-indigo-500 transition">
+                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        <span class="text-sm text-gray-500 dark:text-gray-400">PILIH FILE</span>
+                        <input type="file" id="photo-after-file" accept="image/*" class="hidden" onchange="previewPhotoAfter(this)">
+                      </label>
+                      <button type="button" onclick="capturePhotoAfter()" class="px-4 py-3 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                      </button>
+                    </div>
+                    <div id="photo-after-preview" class="mt-2 hidden">
+                      <img id="photo-after-img" loading="lazy" class="w-full h-32 object-cover rounded-lg" alt="Preview foto after">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <input type="hidden" id="finding-id" value="${findingId}">
+              <input type="hidden" id="photo-after-data" value="">
+              
+              <div class="flex gap-3 pt-4">
+                <button type="button" onclick="closeModal()" class="flex-1 px-4 py-2.5 border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-700 transition">
+                  BATAL
+                </button>
+                <button type="submit" class="flex-1 px-4 py-2.5 btn-primary text-white rounded-xl transition">
+                  SIMPAN
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      
+      document.querySelectorAll('input[name="status"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+          document.getElementById('progress-fields').classList.toggle('hidden', e.target.value !== 'progress');
+          document.getElementById('closed-fields').classList.toggle('hidden', e.target.value !== 'closed');
+        });
+      });
+      
+      document.getElementById('update-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        updateFinding();
+      });
+    }
+
+    function previewPhotoAfter(input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          document.getElementById('photo-after-img').src = e.target.result;
+          document.getElementById('photo-after-preview').classList.remove('hidden');
+          document.getElementById('photo-after-data').value = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    async function capturePhotoAfter() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black z-[60] flex flex-col';
+        modal.innerHTML = `
+          <video id="camera-video" autoplay playsinline class="flex-1 object-cover"></video>
+          <div class="p-4 flex justify-center gap-4">
+            <button id="capture-btn" class="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+              <div class="w-14 h-14 bg-red-500 rounded-full"></div>
+            </button>
+            <button id="cancel-capture" class="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center text-white">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        
+        const video = document.getElementById('camera-video');
+        video.srcObject = stream;
+        
+        document.getElementById('capture-btn').onclick = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext('2d').drawImage(video, 0, 0);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          
+          document.getElementById('photo-after-img').src = dataUrl;
+          document.getElementById('photo-after-preview').classList.remove('hidden');
+          document.getElementById('photo-after-data').value = dataUrl;
+          
+          stream.getTracks().forEach(track => track.stop());
+          modal.remove();
+        };
+        
+        document.getElementById('cancel-capture').onclick = () => {
+          stream.getTracks().forEach(track => track.stop());
+          modal.remove();
+        };
+      } catch (err) {
+        showToast('TIDAK DAPAT MENGAKSES KAMERA', 'error');
+      }
+    }
+
+    async function updateFinding() {
+      const findingId = document.getElementById('finding-id').value;
+      const status = document.querySelector('input[name="status"]:checked')?.value;
+      
+      if (!status) {
+        showToast('PILIH STATUS TERLEBIH DAHULU', 'error');
+        return;
+      }
+      
+      const finding = findings.find(f => f.id === findingId);
+      if (!finding) return;
+      
+      const updateData = { status };
+      
+      if (status === 'progress') {
+        updateData.repair_activity = document.getElementById('repair-activity').value;
+        updateData.pic_repair = document.getElementById('pic-repair').value;
+        updateData.current_condition = document.getElementById('current-condition').value;
+      } else {
+        updateData.repair_activity = document.getElementById('closed-repair-activity').value;
+        updateData.pic_repair = document.getElementById('closed-pic-repair').value;
+        updateData.photo_after = document.getElementById('photo-after-data').value || null;
+        updateData.closed_at = new Date().toISOString();
+      }
+      
+      try {
+        const { error } = await supabase
+          .from('findings')
+          .update(updateData)
+          .eq('id', findingId);
+        
+        if (error) throw error;
+        
+        Object.assign(finding, updateData);
+        
+        await logActivity('UPDATE_FINDING', `UPDATE STATUS TEMUAN MENJADI ${status.toUpperCase()}`);
+        closeModal();
+        showToast('STATUS BERHASIL DIUPDATE', 'success');
+        renderApp();
+      } catch (error) {
+        console.error('Error updating finding:', error);
+        showToast('GAGAL UPDATE STATUS', 'error');
+      }
+    }
+
+    function closeModal(e) {
+      if (e && e.target !== e.currentTarget) return;
+      document.getElementById('modal-container').innerHTML = '';
+    }
+
+    function showImageModal(src) {
+      const modal = document.getElementById('modal-container');
+      modal.innerHTML = `
+        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onclick="closeModal(event)">
+          <img src="${src}" loading="lazy" class="max-w-full max-h-full rounded-lg shadow-2xl" alt="Foto temuan">
+        </div>
+      `;
+    }
+
+    // Form Audit
+    function renderFormAudit(container) {
+      container.innerHTML = `
+        <div class="fade-in max-w-4xl mx-auto">
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-6">FORM INPUT AUDIT 5R</h3>
+            
+            <form id="audit-form" class="space-y-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label for="audit-date" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">TANGGAL AUDIT</label>
+                  <input type="date" id="audit-date" required value="${new Date().toISOString().split('T')[0]}"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white">
+                </div>
+                <div>
+                  <label for="audit-auditor" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">AUDITOR</label>
+                  <input type="text" id="audit-auditor" readonly value="${currentUser?.full_name || ''}"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-100 dark:bg-slate-600 text-gray-800 dark:text-white">
+                </div>
+                <div>
+                  <label for="audit-auditee" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">AUDITEE</label>
+                  <input type="text" id="audit-auditee" required placeholder="NAMA AUDITEE" style="text-transform: uppercase;"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white">
+                </div>
+                <div>
+                  <label for="audit-area" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">PILIH AREA</label>
+                  <select id="audit-area" required onchange="loadAuditItems()"
+                    class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white">
+                    <option value="">-- PILIH AREA --</option>
+                    ${areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              
+              <div id="audit-items-container" class="hidden">
+                <h4 class="font-semibold text-gray-800 dark:text-white mb-4">ITEM AUDIT</h4>
+                <div id="audit-items" class="space-y-4"></div>
+              </div>
+              
+              <div class="flex justify-end pt-4">
+                <button type="submit" class="px-6 py-3 btn-primary text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition">
+                  💾 SIMPAN AUDIT
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      `;
+      
+      document.getElementById('audit-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        saveAudit();
+      });
+    }
+
+    function loadAuditItems() {
+      const areaId = document.getElementById('audit-area').value;
+      const container = document.getElementById('audit-items-container');
+      const itemsContainer = document.getElementById('audit-items');
+      
+      if (!areaId) {
+        container.classList.add('hidden');
+        return;
+      }
+      
+      const items = auditTemplates.filter(t => t.area_id === areaId);
+      
+      if (items.length === 0) {
+        itemsContainer.innerHTML = `
+          <div class="p-8 text-center bg-gray-50 dark:bg-slate-700/50 rounded-xl">
+            <p class="text-gray-500 dark:text-gray-400">BELUM ADA ITEM AUDIT UNTUK AREA INI</p>
+            <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">SILAKAN TAMBAHKAN ITEM DI AUDIT MANAGEMENT</p>
+          </div>
+        `;
+      } else {
+        itemsContainer.innerHTML = items.map((item, index) => `
+          <div class="bg-gray-50 dark:bg-slate-700/50 rounded-xl p-4 space-y-4" data-item-id="${item.id}">
+            <div class="flex items-start justify-between gap-4">
+              <div class="flex-1">
+                <p class="font-medium text-gray-800 dark:text-white">${index + 1}. ${item.item_name}</p>
+              </div>
+              <div class="flex gap-2">
+                <label class="cursor-pointer">
+                  <input type="radio" name="finding-${item.id}" value="no" class="sr-only peer" checked onchange="toggleFindingDetails('${item.id}', false)">
+                  <div class="px-4 py-2 rounded-lg border-2 border-gray-200 dark:border-slate-600 peer-checked:border-emerald-500 peer-checked:bg-emerald-50 dark:peer-checked:bg-emerald-900/20 transition">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">TIDAK ADA</span>
+                  </div>
+                </label>
+                <label class="cursor-pointer">
+                  <input type="radio" name="finding-${item.id}" value="yes" class="sr-only peer" onchange="toggleFindingDetails('${item.id}', true)">
+                  <div class="px-4 py-2 rounded-lg border-2 border-gray-200 dark:border-slate-600 peer-checked:border-red-500 peer-checked:bg-red-50 dark:peer-checked:bg-red-900/20 transition">
+                    <span class="text-sm font-medium text-gray-600 dark:text-gray-400">ADA TEMUAN</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+            
+            <div id="finding-details-${item.id}" class="hidden space-y-4 pt-4 border-t border-gray-200 dark:border-slate-600">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label for="desc-${item.id}" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">DESKRIPSI TEMUAN</label>
+                  <textarea id="desc-${item.id}" rows="2" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="JELASKAN TEMUAN..."></textarea>
+                </div>
+                <div>
+                  <label for="loc-${item.id}" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">LOKASI DETAIL</label>
+                  <input type="text" id="loc-${item.id}" style="text-transform: uppercase;" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-white text-sm" placeholder="LOKASI SPESIFIK">
+                </div>
+                <div>
+                  <label for="due-${item.id}" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">DUE DATE</label>
+                  <input type="date" id="due-${item.id}" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                </div>
+                <div>
+                  <label class="block text-sm text-gray-600 dark:text-gray-400 mb-1">UPLOAD FOTO</label>
+                  <div class="flex gap-2">
+                    <label for="photo-file-${item.id}" class="flex-1 flex items-center justify-center gap-2 px-3 py-2 border-2 border-dashed border-gray-300 dark:border-slate-600 rounded-lg cursor-pointer hover:border-indigo-500 transition text-sm">
+                      <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                      <span class="text-gray-500 dark:text-gray-400">FILE</span>
+                      <input type="file" id="photo-file-${item.id}" accept="image/*" class="hidden" onchange="previewAuditPhoto('${item.id}', this)">
+                    </label>
+                    <button type="button" onclick="captureAuditPhoto('${item.id}')" class="px-3 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 transition">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </button>
+                  </div>
+                  <div id="photo-preview-${item.id}" class="mt-2 hidden">
+                    <img id="photo-img-${item.id}" loading="lazy" class="w-full h-24 object-cover rounded-lg" alt="Preview foto">
+                  </div>
+                  <input type="hidden" id="photo-data-${item.id}">
+                </div>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+      
+      container.classList.remove('hidden');
+    }
+
+    function toggleFindingDetails(itemId, show) {
+      document.getElementById(`finding-details-${itemId}`).classList.toggle('hidden', !show);
+    }
+
+    function previewAuditPhoto(itemId, input) {
+      const file = input.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          document.getElementById(`photo-img-${itemId}`).src = e.target.result;
+          document.getElementById(`photo-preview-${itemId}`).classList.remove('hidden');
+          document.getElementById(`photo-data-${itemId}`).value = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    async function captureAuditPhoto(itemId) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-black z-[60] flex flex-col';
+        modal.innerHTML = `
+          <video id="camera-video-${itemId}" autoplay playsinline class="flex-1 object-cover"></video>
+          <div class="p-4 flex justify-center gap-4">
+            <button id="capture-btn-${itemId}" class="w-16 h-16 bg-white rounded-full flex items-center justify-center">
+              <div class="w-14 h-14 bg-red-500 rounded-full"></div>
+            </button>
+            <button id="cancel-capture-${itemId}" class="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center text-white">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        
+        const video = document.getElementById(`camera-video-${itemId}`);
+        video.srcObject = stream;
+        
+        document.getElementById(`capture-btn-${itemId}`).onclick = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext('2d').drawImage(video, 0, 0);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          
+          document.getElementById(`photo-img-${itemId}`).src = dataUrl;
+          document.getElementById(`photo-preview-${itemId}`).classList.remove('hidden');
+          document.getElementById(`photo-data-${itemId}`).value = dataUrl;
+          
+          stream.getTracks().forEach(track => track.stop());
+          modal.remove();
+        };
+        
+        document.getElementById(`cancel-capture-${itemId}`).onclick = () => {
+          stream.getTracks().forEach(track => track.stop());
+          modal.remove();
+        };
+      } catch (err) {
+        showToast('TIDAK DAPAT MENGAKSES KAMERA', 'error');
+      }
+    }
+
+    async function saveAudit() {
+      const auditDate = document.getElementById('audit-date').value;
+      const auditor = document.getElementById('audit-auditor').value;
+      const auditee = document.getElementById('audit-auditee').value;
+      const areaId = document.getElementById('audit-area').value;
+      
+      if (!auditDate || !auditor || !auditee || !areaId) {
+        showToast('LENGKAPI SEMUA FIELD YANG DIPERLUKAN', 'error');
+        return;
+      }
+      
+      try {
+        // Insert audit
+        const audit = {
+          audit_date: auditDate,
+          auditor,
+          auditee,
+          area_id: areaId,
+          created_at: new Date().toISOString()
+        };
+        
+        const { data: auditData, error: auditError } = await supabase
+          .from('audits')
+          .insert([audit])
+          .select()
+          .single();
+        
+        if (auditError) throw auditError;
+        
+        audits.unshift(auditData);
+        const auditId = auditData.id;
+        
+        // Insert findings
+        const items = auditTemplates.filter(t => t.area_id === areaId);
+        const findingsToInsert = [];
+        
+        items.forEach(item => {
+          const hasFinding = document.querySelector(`input[name="finding-${item.id}"]:checked`)?.value === 'yes';
+          
+          const finding = {
+            audit_id: auditId,
+            template_item_id: item.id,
+            item_name: item.item_name,
+            has_finding: hasFinding,
+            status: hasFinding ? 'open' : 'closed',
+            created_at: new Date().toISOString()
+          };
+          
+          if (hasFinding) {
+            finding.description = document.getElementById(`desc-${item.id}`)?.value || '';
+            finding.location_detail = document.getElementById(`loc-${item.id}`)?.value || '';
+            finding.due_date = document.getElementById(`due-${item.id}`)?.value || null;
+            finding.photo_before = document.getElementById(`photo-data-${item.id}`)?.value || null;
+          }
+          
+          findingsToInsert.push(finding);
+        });
+        
+        if (findingsToInsert.length > 0) {
+          const { data: findingsData, error: findingsError } = await supabase
+            .from('findings')
+            .insert(findingsToInsert)
+            .select();
+          
+          if (!findingsError && findingsData) {
+            findings.unshift(...findingsData);
+          }
+        }
+        
+        await logActivity('CREATE_AUDIT', `MEMBUAT AUDIT BARU UNTUK AREA ${areas.find(a => a.id === areaId)?.name || areaId}`);
+        showToast('AUDIT BERHASIL DISIMPAN', 'success');
+        navigateTo('dashboard');
+      } catch (error) {
+        console.error('Error saving audit:', error);
+        showToast('GAGAL MENYIMPAN AUDIT', 'error');
+      }
+    }
+
+    // Audit Management
+    function renderAuditManagement(container) {
+      container.innerHTML = `
+        <div class="fade-in max-w-4xl mx-auto space-y-6">
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-6">KELOLA TEMPLATE AUDIT</h3>
+            
+            <div class="space-y-6">
+              <div>
+                <label for="mgmt-area" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">PILIH AREA</label>
+                <select id="mgmt-area" onchange="loadTemplateItems()"
+                  class="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white">
+                  <option value="">-- PILIH AREA --</option>
+                  ${areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+                </select>
+              </div>
+              
+              <div id="template-container" class="hidden space-y-4">
+                <div class="flex items-center justify-between">
+                  <h4 class="font-semibold text-gray-800 dark:text-white">ITEM AUDIT</h4>
+                  <button onclick="addTemplateItem()" class="flex items-center gap-2 px-4 py-2 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    TAMBAH ITEM
+                  </button>
+                </div>
+                
+                <div id="template-items" class="space-y-2"></div>
+                
+                <div class="flex justify-end pt-4">
+                  <button onclick="saveTemplate()" class="px-6 py-3 btn-primary text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition">
+                    💾 SIMPAN TEMPLATE
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    let tempTemplateItems = [];
+
+    function loadTemplateItems() {
+      const areaId = document.getElementById('mgmt-area').value;
+      const container = document.getElementById('template-container');
+      
+      if (!areaId) {
+        container.classList.add('hidden');
+        return;
+      }
+      
+      tempTemplateItems = auditTemplates.filter(t => t.area_id === areaId).map(t => ({ ...t }));
+      renderTemplateItems();
+      container.classList.remove('hidden');
+    }
+
+    function renderTemplateItems() {
+      const container = document.getElementById('template-items');
+      
+      if (tempTemplateItems.length === 0) {
+        container.innerHTML = `
+          <div class="p-8 text-center bg-gray-50 dark:bg-slate-700/50 rounded-xl">
+            <p class="text-gray-500 dark:text-gray-400">BELUM ADA ITEM AUDIT</p>
+            <p class="text-sm text-gray-400 dark:text-gray-500 mt-1">KLIK TOMBOL "TAMBAH ITEM" UNTUK MENAMBAHKAN</p>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = tempTemplateItems.map((item, index) => `
+        <div class="flex items-center gap-3 bg-gray-50 dark:bg-slate-700/50 rounded-xl p-3">
+          <span class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg flex items-center justify-center text-sm font-semibold">${index + 1}</span>
+          <input type="text" value="${item.item_name}" onchange="updateTemplateItem(${index}, this.value)" style="text-transform: uppercase;"
+            class="flex-1 px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+          <button onclick="removeTemplateItem(${index})" class="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function addTemplateItem() {
+      const areaId = document.getElementById('mgmt-area').value;
+      tempTemplateItems.push({
+        id: `temp-${Date.now()}`,
+        area_id: areaId,
+        item_name: ''
+      });
+      renderTemplateItems();
+    }
+
+    function updateTemplateItem(index, value) {
+      tempTemplateItems[index].item_name = value;
+    }
+
+    function removeTemplateItem(index) {
+      tempTemplateItems.splice(index, 1);
+      renderTemplateItems();
+    }
+
+    async function saveTemplate() {
+      const areaId = document.getElementById('mgmt-area').value;
+      
+      const validItems = tempTemplateItems.filter(item => item.item_name.trim());
+      
+      if (validItems.length === 0) {
+        showToast('TAMBAHKAN MINIMAL SATU ITEM AUDIT', 'error');
+        return;
+      }
+      
+      try {
+        // Delete existing templates for this area
+        const { error: deleteError } = await supabase
+          .from('audit_templates')
+          .delete()
+          .eq('area_id', areaId);
+        
+        if (deleteError) throw deleteError;
+        
+        // Insert new templates
+        const itemsToInsert = validItems.map(item => ({
+          area_id: areaId,
+          item_name: item.item_name,
+          created_at: new Date().toISOString()
+        }));
+        
+        const { data, error: insertError } = await supabase
+          .from('audit_templates')
+          .insert(itemsToInsert)
+          .select();
+        
+        if (insertError) throw insertError;
+        
+        // Update local state
+        auditTemplates = auditTemplates.filter(t => t.area_id !== areaId);
+        if (data) {
+          auditTemplates.push(...data);
+        }
+        
+        await logActivity('SAVE_TEMPLATE', `MENYIMPAN TEMPLATE AUDIT UNTUK AREA ${areas.find(a => a.id === areaId)?.name || areaId}`);
+        showToast('TEMPLATE BERHASIL DISIMPAN', 'success');
+      } catch (error) {
+        console.error('Error saving template:', error);
+        showToast('GAGAL MENYIMPAN TEMPLATE', 'error');
+      }
+    }
+
+    // History
+    function renderHistory(container) {
+      const auditors = [...new Set(audits.map(a => a.auditor))];
+      const auditees = [...new Set(audits.map(a => a.auditee))];
+      
+      container.innerHTML = `
+        <div class="fade-in space-y-6">
+          <!-- Activity Log -->
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-4">LOG AKTIVITAS</h3>
+            <div class="max-h-64 overflow-y-auto space-y-2">
+              ${activityLogs.slice(0, 50).map(log => `
+                <div class="flex items-start gap-3 p-3 bg-gray-50 dark:bg-slate-700/50 rounded-lg">
+                  <div class="w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span class="text-xs font-bold text-indigo-600 dark:text-indigo-400">${log.user_name?.charAt(0)?.toUpperCase() || 'S'}</span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-800 dark:text-white">${log.details}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      <span class="font-medium">${log.user_name}</span> • ${formatDateTime(log.created_at)}
+                    </p>
+                  </div>
+                  <span class="px-2 py-1 text-xs font-medium bg-gray-200 dark:bg-slate-600 text-gray-600 dark:text-gray-300 rounded">${log.action}</span>
+                </div>
+              `).join('')}
+              ${activityLogs.length === 0 ? '<p class="text-center text-gray-500 dark:text-gray-400 py-4">BELUM ADA AKTIVITAS</p>' : ''}
+            </div>
+          </div>
+          
+          <!-- Download Section -->
+          <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm p-6">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-4">DOWNLOAD DATA AUDIT</h3>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div>
+                <label for="download-start-date" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">TANGGAL MULAI</label>
+                <input type="date" id="download-start-date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+              </div>
+              <div>
+                <label for="download-end-date" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">TANGGAL AKHIR</label>
+                <input type="date" id="download-end-date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+              </div>
+              <div>
+                <label for="download-area" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">AREA</label>
+                <select id="download-area" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                  <option value="">SEMUA AREA</option>
+                  ${areas.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label for="download-auditor" class="block text-sm text-gray-600 dark:text-gray-400 mb-1">AUDITOR</label>
+                <select id="download-auditor" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-700 text-gray-800 dark:text-white text-sm">
+                  <option value="">SEMUA AUDITOR</option>
+                  ${auditors.map(a => `<option value="${a}">${a}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            
+            <button onclick="downloadPDF()" class="flex items-center gap-2 px-6 py-3 btn-primary text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              DOWNLOAD PDF
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function formatDateTime(dateStr) {
+      if (!dateStr) return '-';
+      const date = new Date(dateStr);
+      const months = ['JAN', 'FEB', 'MAR', 'APR', 'MEI', 'JUN', 'JUL', 'AGU', 'SEP', 'OKT', 'NOV', 'DES'];
+      return `${String(date.getDate()).padStart(2, '0')} ${months[date.getMonth()]} ${date.getFullYear()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+
+    async function downloadPDF() {
+      const startDate = document.getElementById('download-start-date').value;
+      const endDate = document.getElementById('download-end-date').value;
+      const areaId = document.getElementById('download-area').value;
+      const auditor = document.getElementById('download-auditor').value;
+      
+      let filteredAudits = [...audits];
+      
+      if (startDate) {
+        filteredAudits = filteredAudits.filter(a => a.audit_date >= startDate);
+      }
+      if (endDate) {
+        filteredAudits = filteredAudits.filter(a => a.audit_date <= endDate);
+      }
+      if (areaId) {
+        filteredAudits = filteredAudits.filter(a => a.area_id === areaId);
+      }
+      if (auditor) {
+        filteredAudits = filteredAudits.filter(a => a.auditor === auditor);
+      }
+      
+      const auditIds = filteredAudits.map(a => a.id);
+      const filteredFindings = findings.filter(f => auditIds.includes(f.audit_id) && f.has_finding);
+      
+      const content = document.createElement('div');
+      content.style.padding = '20px';
+      content.style.fontFamily = 'Arial, sans-serif';
+      content.innerHTML = `
+        <h1 style="text-align: center; color: #4f46e5; margin-bottom: 20px; text-transform: uppercase;">LAPORAN AUDIT 5R</h1>
+        <p style="text-align: center; margin-bottom: 30px; text-transform: uppercase;">
+          PERIODE: ${startDate || 'AWAL'} S/D ${endDate || 'SEKARANG'}<br>
+          DIGENERATE: ${formatDateTime(new Date().toISOString())}
+        </p>
+        
+        <h2 style="color: #374151; border-bottom: 2px solid #4f46e5; padding-bottom: 5px; text-transform: uppercase;">RINGKASAN</h2>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; text-transform: uppercase;">TOTAL AUDIT</td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${filteredAudits.length}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; text-transform: uppercase;">TOTAL TEMUAN</td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${filteredFindings.length}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; text-transform: uppercase;">OPEN</td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold; color: #dc2626;">${filteredFindings.filter(f => f.status === 'open').length}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; text-transform: uppercase;">PROGRESS</td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold; color: #f59e0b;">${filteredFindings.filter(f => f.status === 'progress').length}</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; text-transform: uppercase;">CLOSED</td>
+            <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold; color: #10b981;">${filteredFindings.filter(f => f.status === 'closed').length}</td>
+          </tr>
+        </table>
+        
+        <h2 style="color: #374151; border-bottom: 2px solid #4f46e5; padding-bottom: 5px; text-transform: uppercase;">DETAIL TEMUAN</h2>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <thead>
+            <tr style="background: #f3f4f6;">
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">NO</th>
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">TGL AUDIT</th>
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">AREA</th>
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">AUDITOR</th>
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">TEMUAN</th>
+              <th style="padding: 8px; border: 1px solid #e5e7eb; text-align: left; text-transform: uppercase;">STATUS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredFindings.map((f, i) => {
+              const audit = filteredAudits.find(a => a.id === f.audit_id);
+              const area = areas.find(a => a.id === audit?.area_id);
+              return `
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${i + 1}</td>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${formatDate(audit?.audit_date)}</td>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${area?.name || '-'}</td>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${audit?.auditor || '-'}</td>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${f.description || f.item_name}</td>
+                  <td style="padding: 8px; border: 1px solid #e5e7eb;">${getStatusText(f.status)}</td>
+                </tr>
+              `;
+            }).join('')}
+            ${filteredFindings.length === 0 ? '<tr><td colspan="6" style="padding: 20px; text-align: center; border: 1px solid #e5e7eb; text-transform: uppercase;">TIDAK ADA DATA</td></tr>' : ''}
+          </tbody>
+        </table>
+      `;
+      
+      document.body.appendChild(content);
+      
+      try {
+        await html2pdf().set({
+          margin: 10,
+          filename: `LAPORAN_AUDIT_5R_${new Date().toISOString().split('T')[0]}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2 },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }).from(content).save();
+        
+        showToast('PDF BERHASIL DIDOWNLOAD', 'success');
+        logActivity('DOWNLOAD_PDF', 'DOWNLOAD LAPORAN AUDIT PDF');
+      } catch (error) {
+        showToast('GAGAL MEMBUAT PDF', 'error');
+      } finally {
+        document.body.removeChild(content);
+      }
+    }
+
+    // Toast Notification
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg ${
+        type === 'success' ? 'bg-emerald-500' : 
+        type === 'error' ? 'bg-red-500' : 
+        'bg-indigo-500'
+      } text-white transform transition-all duration-300 translate-x-0`;
+      
+      toast.innerHTML = `
+        <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          ${type === 'success' ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>' : 
+            type === 'error' ? '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>' :
+            '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'}
+        </svg>
+        <span class="text-sm font-medium">${message}</span>
+      `;
+      
+      container.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.classList.add('translate-x-full', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // Initialize app
+    init();
+  </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c0ced0640176be7',t:'MTc2ODg5NDg0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>

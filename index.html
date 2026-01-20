@@ -7,7 +7,7 @@
   <script src="/_sdk/element_sdk.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
   <script>
     tailwind.config = {
@@ -48,7 +48,8 @@
     // Supabase Configuration
     const SUPABASE_URL = 'https://rmycdaviqpasbsjfytyc.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJteWNkYXZpcXBhc2JzamZ5dHljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg4ODk5NzMsImV4cCI6MjA4NDQ2NTk3M30.0kb-HJGm2PueyTzYsdD6tN3Mtpolcsygo7BUXPO-yx0';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const { createClient } = supabase;
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     
     let currentUser = null;
     let currentPage = 'dashboard';
@@ -130,7 +131,7 @@
     async function initDatabase() {
       try {
         // Load areas
-        const { data: areasData, error: areasError } = await supabase
+        const { data: areasData, error: areasError } = await supabaseClient
           .from('areas')
           .select('*')
           .order('name');
@@ -140,7 +141,7 @@
         }
         
         // Load audit templates
-        const { data: templatesData, error: templatesError } = await supabase
+        const { data: templatesData, error: templatesError } = await supabaseClient
           .from('audit_templates')
           .select('*')
           .order('created_at');
@@ -150,7 +151,7 @@
         }
         
         // Load audits
-        const { data: auditsData, error: auditsError } = await supabase
+        const { data: auditsData, error: auditsError } = await supabaseClient
           .from('audits')
           .select('*')
           .order('audit_date', { ascending: false });
@@ -160,7 +161,7 @@
         }
         
         // Load findings
-        const { data: findingsData, error: findingsError } = await supabase
+        const { data: findingsData, error: findingsError } = await supabaseClient
           .from('findings')
           .select('*')
           .order('created_at', { ascending: false });
@@ -170,7 +171,7 @@
         }
         
         // Load activity logs
-        const { data: logsData, error: logsError } = await supabase
+        const { data: logsData, error: logsError } = await supabaseClient
           .from('activity_logs')
           .select('*')
           .order('created_at', { ascending: false })
@@ -227,7 +228,7 @@
       };
       
       try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from('activity_logs')
           .insert([log])
           .select()
@@ -1010,7 +1011,7 @@
       }
       
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('findings')
           .update(updateData)
           .eq('id', findingId);
@@ -1264,7 +1265,7 @@
           created_at: new Date().toISOString()
         };
         
-        const { data: auditData, error: auditError } = await supabase
+        const { data: auditData, error: auditError } = await supabaseClient
           .from('audits')
           .insert([audit])
           .select()
@@ -1302,7 +1303,7 @@
         });
         
         if (findingsToInsert.length > 0) {
-          const { data: findingsData, error: findingsError } = await supabase
+          const { data: findingsData, error: findingsError } = await supabaseClient
             .from('findings')
             .insert(findingsToInsert)
             .select();
@@ -1433,7 +1434,7 @@
       
       try {
         // Delete existing templates for this area
-        const { error: deleteError } = await supabase
+        const { error: deleteError } = await supabaseClient
           .from('audit_templates')
           .delete()
           .eq('area_id', areaId);
@@ -1447,7 +1448,7 @@
           created_at: new Date().toISOString()
         }));
         
-        const { data, error: insertError } = await supabase
+        const { data, error: insertError } = await supabaseClient
           .from('audit_templates')
           .insert(itemsToInsert)
           .select();
@@ -1682,5 +1683,5 @@
     // Initialize app
     init();
   </script>
- <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c0ced0640176be7',t:'MTc2ODg5NDg0OS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9c0cf927d308ce23',t:'MTc2ODg5NTM0Ni4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
